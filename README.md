@@ -88,9 +88,15 @@ bash packaging/android/build.sh   # 构建 Android APK（需要 Android SDK）
 
 ### 一、首次上线
 
-1. 推代码到 `main`（`ci.yml` 会跑平衡模拟 + 浏览器断言 + 截图校验）
-2. 仓库 **Settings → Pages → Source** 选 **GitHub Actions**（`pages.yml` 会自动部署）
+1. 推代码到 `main`（`ci.yml` 跑平衡模拟 + 浏览器断言 + 截图校验；`pages.yml` 把站点推到 `gh-pages` 分支）
+2. **只需在设置里点一次**：仓库 **Settings → Pages → Build and deployment → Source =
+   「Deploy from a branch」→ 分支选 `gh-pages` / 根目录**
    → 网页版上线在 `https://wzhgeek.github.io/deep-vein/`
+
+> 这一步必须手动点一次：启用 Pages 属于仓库设置，工作流没有权限替你做
+> （用 `actions/configure-pages` 的 `enablement` 也不行，实测仍失败）。
+> **注意应用内的更新检查不依赖 Pages** —— 它按 `version.json` 的多个候选地址依次尝试，
+> GitHub Pages 没启用时会自动回退到 jsDelivr 镜像。
 
 ### 二、发一个新版本
 
@@ -117,6 +123,15 @@ git tag v1.0.1 && git push origin main --tags
 | 网页 / PWA | Service Worker 检测到新版本 → 标题页出现「新版本已就绪 · 点这里刷新」（不自动刷新，免得毁掉正在打的一局） |
 | macOS .app | 启动 1.2 秒后静默读 `version.json`，有新版则标题页出现「新版本 vX 可用 · 点这里更新」→ 用系统浏览器打开下载页 |
 | Android APK | 同上。点提示后由 `WebViewClient` 转交系统浏览器打开 Release 页 |
+
+版本清单按优先级依次尝试，**第一个成功即用**：
+
+```
+网页/PWA : version.json（同源）
+.app/.apk: https://wzhgeek.github.io/deep-vein/version.json      ← Pages 启用后走这条
+           https://cdn.jsdelivr.net/gh/Wzhgeek/deep-vein@main/version.json   ← 兜底，最稳
+           https://raw.githubusercontent.com/Wzhgeek/deep-vein/main/version.json
+```
 
 设计原则：**检查更新永远不能让游戏玩不了** —— 3 秒超时、任何失败静默忽略、完全不联网也能正常玩。
 （安卓壳因此加了 `INTERNET` 权限，但只用于这一次 GET。）

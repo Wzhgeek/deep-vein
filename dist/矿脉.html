@@ -71,8 +71,15 @@ globalThis.VEIN_RELEASED = '2026-10-10';
 'use strict';
 (function (root) {
 
-  const DEFAULT_MANIFEST = 'https://wzhgeek.github.io/deep-vein/version.json';
-  const TIMEOUT_MS = 3000;
+  // 版本清单的多个候选地址，按顺序试，第一个成功即用。
+  // 不能只依赖 GitHub Pages：仓库没启用 Pages 时那个地址是 404，
+  // 更新检查就会静默失效。jsDelivr 镜像 GitHub 仓库，是最稳的兜底。
+  const ABSOLUTE_MANIFESTS = [
+    'https://wzhgeek.github.io/deep-vein/version.json',
+    'https://cdn.jsdelivr.net/gh/Wzhgeek/deep-vein@main/version.json',
+    'https://raw.githubusercontent.com/Wzhgeek/deep-vein/main/version.json',
+  ];
+  const TIMEOUT_MS = 2500;
 
   /** "1.2.10" > "1.2.9"，按数字段比较（字符串比较会把 1.10 判小于 1.9） */
   function cmpVersion(a, b) {
@@ -87,48 +94,75 @@ globalThis.VEIN_RELEASED = '2026-10-10';
 
   const U = {
     get VERSION() { return root.VEIN_VERSION || '0.0.0'; },  // 由 tools/build-version.js 生成
-    manifestUrl: DEFAULT_MANIFEST,
+    manifestUrl: ABSOLUTE_MANIFESTS[0],
     lastResult: null,          // { ok, latest, url, notes, error }
     _fetch: null,              // 测试可注入
 
-    /** 判定当前运行环境该怎么取 version.json */
-    resolveUrl() {
+    /** 按优先级给出所有可试的清单地址 */
+    resolveUrls() {
       const proto = (root.location && root.location.protocol) || '';
+      const out = [];
       if (proto === 'http:' || proto === 'https:') {
-        // 网页/PWA：同源相对路径最好（不写死域名，换托管也不用改）
-        return 'version.json';
+        out.push('version.json');          // 网页/PWA：同源相对路径最好，换托管也不用改
       }
-      return U.manifestUrl;    // file://（本地双击 / .app / .apk）走绝对地址
+      for (const u of ABSOLUTE_MANIFESTS) if (out.indexOf(u) < 0) out.push(u);
+      return out;
     },
+
+    /** 兼容旧接口：返回首选地址 */
+    resolveUrl() { return U.resolveUrls()[0]; },
 
     /**
      * 检查更新。返回 Promise，永远是 resolve（不抛错）。
      * @param opts.force 用户手动点击时传 true —— 那种情况下失败要给出提示
      */
-    check(opts) {
-      opts = opts || {};
-      const url = U.resolveUrl();
+    /** 试一个地址 */
+    _one(url) {
       const f = U._fetch || root.fetch;
-      if (!f) { U.lastResult = { ok: false, error: 'no-fetch' }; return Promise.resolve(U.lastResult); }
-
       const ctl = root.AbortController ? new root.AbortController() : null;
       const timer = ctl ? root.setTimeout(() => ctl.abort(), TIMEOUT_MS) : null;
       // 加时间戳绕过缓存，否则可能一直读到旧的 version.json
       const bust = url + (url.indexOf('?') < 0 ? '?' : '&') + 't=' + Date.now();
-
       return f(bust, ctl ? { signal: ctl.signal, cache: 'no-store' } : { cache: 'no-store' })
         .then(r => { if (!r || !r.ok) throw new Error('HTTP ' + (r && r.status)); return r.json(); })
         .then(j => {
+          if (timer) root.clearTimeout(timer);
+          if (!j || !j.version) throw new Error('清单格式不对');
+          return j;
+        })
+        .catch(e => { if (timer) root.clearTimeout(timer); throw e; });
+    },
+
+    /**
+     * 检查更新。逐个候选地址试，第一个成功就返回。
+     * 返回 Promise，**永远 resolve**（失败只是一种结果，不是异常）。
+     */
+    check(opts) {
+      opts = opts || {};
+      const f = U._fetch || root.fetch;
+      if (!f) { U.lastResult = { ok: false, error: 'no-fetch' }; return Promise.resolve(U.lastResult); }
+
+      const urls = U.resolveUrls().slice(0, opts.maxSources || 3);
+      let i = 0, lastErr = 'unknown';
+      const attempt = () => {
+        if (i >= urls.length) {
+          U.lastResult = { ok: false, error: lastErr, tried: urls.length };
+          return Promise.resolve(U.lastResult);
+        }
+        const url = urls[i++];
+        return U._one(url).then(j => {
           const latest = String(j.version || '');
-          const hasNew = cmpVersion(latest, U.VERSION) > 0;
-          U.lastResult = { ok: true, latest: latest, hasNew: hasNew, url: j.url || '', notes: j.notes || '', pages: j.pages || '' };
+          U.lastResult = {
+            ok: true, latest: latest, hasNew: cmpVersion(latest, U.VERSION) > 0,
+            url: j.url || '', notes: j.notes || '', pages: j.pages || '', source: url
+          };
           return U.lastResult;
-        })
-        .catch(e => {
-          U.lastResult = { ok: false, error: (e && e.name === 'AbortError') ? 'timeout' : String(e && e.message || e) };
-          return U.lastResult;
-        })
-        .then(r => { if (timer) root.clearTimeout(timer); return r; });
+        }).catch(e => {
+          lastErr = (e && e.name === 'AbortError') ? 'timeout' : String((e && e.message) || e);
+          return attempt();
+        });
+      };
+      return attempt();
     },
 
     /** 在系统浏览器里打开链接。WebView 壳会拦截 window.open 并转交系统浏览器。 */
