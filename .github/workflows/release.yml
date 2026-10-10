@@ -94,6 +94,28 @@ jobs:
           bash packaging/android/build.sh
       - name: 改名
         run: cp packaging/android/app/build/outputs/apk/debug/app-debug.apk DeepVein-android.apk
+
+      - name: 校验 APK 内容（必须有游戏本体，且版本号正确）
+        run: |
+          python3 - <<'PYEOF'
+          import zipfile, re, sys
+          z = zipfile.ZipFile('DeepVein-android.apk')
+          names = z.namelist()
+          need = ['AndroidManifest.xml', 'classes.dex', 'resources.arsc']
+          for n in need:
+              assert n in names, 'APK 缺少 ' + n
+          hit = [n for n in names if n == 'assets/deepvein.html']
+          assert hit, 'APK 里没有 assets/deepvein.html —— 壳能装上但打开是空白'
+          html = z.read(hit[0]).decode('utf-8', 'replace')
+          assert len(html) > 100000, '游戏本体太小（%d 字节），疑似没打进去' % len(html)
+          assert 'script src=' not in html, '不是单文件版本，资源会有缺失'
+          m = re.search(r"VEIN_VERSION\s*=\s*'([0-9.]+)'", html)
+          ver = m.group(1) if m else '?'
+          print('APK 条目数 %d；游戏本体 %d 字节；版本 %s' % (len(names), len(html), ver))
+          print('图标:', [n for n in names if 'ic_launcher' in n][:3])
+          print('✅ APK 内容校验通过')
+          PYEOF
+          unzip -l DeepVein-android.apk | tail -3
       - uses: actions/upload-artifact@v4
         with:
           name: android
