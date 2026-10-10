@@ -151,6 +151,23 @@
         App.mode = 'title';
         App.updateResult = { ok: true, latest: '9.9.9', hasNew: true, url: 'https://example.com/dl' };
       }],
+      ['矿层播报', () => {
+        const M = App.getMeta(); M.tutorialDone = true; M.upgrades.slot = 0;
+        App.startRun(); App.mode = 'play';
+        // 直接摆出"刚进入晶洞层"的播报状态，检查横幅排版
+        App.strataBanner = { name: '晶洞层', brief: '晶簇成片 —— 但深岩也密，能挖的路比别处窄。', t: 3.0 };
+      }],
+      ['磁石对局', () => {
+        const r = App.run; if (!r) { App.startRun(); }
+        App.mode = 'play';
+        const Vv = V;
+        // 手工放一块磁石与一块银砂（第 6 色），验证新素材与配色
+        r.board[1][2] = { t: Vv.T.MAGNET };
+        r.board[2][3] = { t: Vv.T.ORE, c: 5 };
+        r.board[1][4] = { t: Vv.T.ORE, c: 5 };
+        r.depth = 13;
+        App.stratumId = Vv.stratumOf(13).id;
+      }],
       ['新手教学', () => {
         App.getMeta().tutorialDone = false;
         App.getMeta().upgrades.slot = 0;

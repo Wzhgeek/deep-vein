@@ -58,7 +58,11 @@
 
   const SCENES = {
     title: () => { freshMeta({ dust: 1860, bestDepth: 17, runs: 23 }); App.mode = 'title'; App.updateResult = null; },
-    play: () => { freshMeta(); App.startRun(); App.mode = 'play'; playMoves(App.run, 70); },
+    play: () => {
+      freshMeta(); App.startRun(); App.mode = 'play'; playMoves(App.run, 70);
+      // 机器人可能中途塌方；这个场景要拍的是"对局中的盘面"，所以结束了就重来
+      if (App.run.phase === 'over') { App.startRun(); App.mode = 'play'; playMoves(App.run, 45); }
+    },
     tutorial: () => { freshMeta({ tutorialDone: false, dust: 320, bestDepth: 0, runs: 0 }); App.startRun(); App.mode = 'play'; },
     draft: () => { freshMeta(); App.startRun(); App.mode = 'play'; playMoves(App.run, 34);
                    const s = App.run; s.phase = 'draft'; s.draft = ['chain', 'twin', 'lavaheart']; App.mode = 'draft'; },
@@ -71,7 +75,31 @@
       M.achievements = {}; ids.forEach((id, i) => M.achievements[id] = Date.now() - i * 8e6);
       App.mode = 'ach';
     },
-    deep: () => { freshMeta({ dust: 4210, ascension: 1 }); App.startRun(); App.mode = 'play'; playMoves(App.run, 150); }
+    deep: () => { freshMeta({ dust: 4210, ascension: 1 }); App.startRun(); App.mode = 'play'; playMoves(App.run, 150); },
+    // 矿层播报：整局唯一会"报地名"的地方
+    strata: () => {
+      freshMeta({ dust: 980, bestDepth: 19, runs: 12 });
+      App.startRun(); App.mode = 'play';
+      const s = App.run; s.depth = 7;
+      App.stratumId = 'geode';
+      App.strataBanner = { name: '晶洞层', brief: V.stratumOf(7).brief, t: 3.0 };
+      playMoves(s, 40);
+    },
+    // 深渊：第 6 色、磁石、深岩同时出现
+    abyss: () => {
+      freshMeta({ dust: 6400, bestDepth: 26, runs: 31, ascension: 3 });
+      App.startRun(); App.mode = 'play';
+      const s = App.run; s.depth = 23;
+      App.stratumId = 'abyss';
+      for (let r = 0; r < V.ROWS; r++) for (let c = 0; c < V.COLS; c++) {
+        s.board[r][c] = { t: V.T.ORE, c: (r * 3 + c) % 6 };     // 六色铺满
+      }
+      s.board[1][2] = { t: V.T.MAGNET };
+      s.board[2][5] = { t: V.T.CRYSTAL };
+      s.board[4][3] = { t: V.T.DEEPSTONE };
+      s.board[6][1] = { t: V.T.LAVA };
+      s.board[1][1] = null; s.board[0][2] = null; s.board[1][3] = null;
+    }
   };
 
   const want = (location.hash || '#title').slice(1);

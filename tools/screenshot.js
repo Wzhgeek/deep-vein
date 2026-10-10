@@ -28,6 +28,8 @@ const SCENES = [
   ['settle', '升井结算'],
   ['achievements', '成就'],
   ['deep', '深层精英矿'],
+  ['strata', '矿层播报'],
+  ['abyss', '深渊六色'],
 ];
 
 const { findChrome } = require('./chrome-path');

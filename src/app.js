@@ -144,6 +144,8 @@
     App.particles.length = 0; App.floats.length = 0;
     App.cave = {};
     App.achBanner = null;
+    App.stratumId = V.stratumOf(1).id;
+    App.strataBanner = null;
     meta.runs++;
     // 第一次下井自动进入教学（每日挑战不教学）
     if (!meta.tutorialDone && !daily && !opts0SkipTut()) { App.tut = { on: true, step: 0 }; prepTutorialBoard(App.run); }
@@ -316,7 +318,7 @@
       if (e.type === 'dig') {
         const st = A.ORE_STYLE;
         for (const c of e.cells) {
-          const col = c.t === 0 ? st[c.col % 5].pal : (A.HAZARD_STYLE[c.t] ? A.HAZARD_STYLE[c.t].pal : 'bedrock');
+          const col = c.t === 0 ? st[(c.col || 0) % st.length].pal : (A.HAZARD_STYLE[c.t] ? A.HAZARD_STYLE[c.t].pal : 'bedrock');
           burst(c.r, c.c, A.P[col][2], c.t === 0 ? 5 : 8);
         }
         addCave(e.cells);
@@ -327,7 +329,15 @@
         App.flash = 0.5; App.flashColor = '#ff3b30'; App.shake = 6; S.hurt();
         float(BOARD_X + 60, BOARD_Y + 30, '-' + e.amount + ' 空气', '#ff7b6b');
       } else if (e.type === 'breath') { S.breath(); }
-      else if (e.type === 'descend') { App.flash = 0.35; App.flashColor = '#9ff0d0'; S.descend(); }
+      else if (e.type === 'descend') {
+        App.flash = 0.35; App.flashColor = '#9ff0d0'; S.descend();
+        // 换层了：播报一次。这是全程唯一会"报地名"的地方，所以文案要短。
+        const st = V.stratumOf(s.depth);
+        if (st.id !== App.stratumId) {
+          App.stratumId = st.id;
+          App.strataBanner = { name: st.name, brief: st.brief, t: 3.4 };
+        }
+      }
       else if (e.type === 'collapse') {
         App.shake = 16; App.flash = 0.9; App.flashColor = '#c0392b'; S.collapse();
         App.mode = 'over'; App.lastResult = V.ascend(App.run); checkFinal(App.lastResult);
@@ -431,6 +441,12 @@
       ctx.fillStyle = c % 2 ? '#5c4227' : '#6b4c2e';
       ctx.fillRect(BOARD_X - 6 + c * TILE - 3, BOARD_Y - 18, 7, 15);
     }
+    // 矿层色调：一层一层换颜色，是"我换地方了"最省字量的表达。
+    // 画在矿石之前、盘面之后，所以只影响"矿洞"而不影响矿石本身的辨识度。
+    const strat = V.stratumOf(s.depth);
+    ctx.fillStyle = strat.tint;
+    ctx.fillRect(BOARD_X - 6, BOARD_Y - 18, V.COLS * TILE + 12, V.ROWS * TILE + 18);
+
     const res = s.relicFlags;
     const hintGroup = (res.hint && s.phase === 'play') ? V.bestGroup(s) : null;
     const hintSet = {};
@@ -508,11 +524,14 @@
     // 深度：镐 + 大号数字（k=2 = 32px）
     A.drawSprite(uctx, 'pick', 'steel', 12, 10, 2);
     tx(String(s.depth), 38, 6, { k: 2, c: C.gold });
-    tx('层', 38 + tw(String(s.depth), false, 2) + 5, 20, { c: C.dim2 });
+    // y=14 让"层"相对 32px 的大号数字垂直居中；原来在 20 会和下一行压 4px
+    tx('层', 38 + tw(String(s.depth), false, 2) + 5, 14, { c: C.dim2 });
     if (meta.bestDepth > 0) {
-      A.drawSprite(uctx, 'star', 'steel', 12, 34, 1, 0.5);
-      tx(meta.bestDepth, 24, 32, { c: C.dim2 });
+      A.drawSprite(uctx, 'star', 'steel', 8, 34, 1, 0.5);
+      tx(meta.bestDepth, 20, 32, { c: C.dim2 });
     }
+    // 当前矿层名：常驻 HUD，让"我在哪一层"随时可见（播报横幅会消失，这个不会）
+    tx(V.stratumOf(s.depth).name, 44, 32, { c: C.dim2 });
 
     // 空气：分段条 + 16px 数字
     A.drawSprite(uctx, 'heart', 'teal', 132, 12, 2);
@@ -673,6 +692,7 @@
     drawTutorial();
     drawToast();
     if (App.achBanner) drawAchBanner();
+    drawStrataBanner();
   }
 
   function drawToast() {
@@ -747,7 +767,7 @@
     for (let c = 0; c < W / tile; c++) for (let r = 0; r < rows; r++) {
       const n = V.hash2(c * 11 + 5, r * 13 + 3);
       if (n > 0.86) {
-        const ci = Math.floor(V.hash2(c * 7, r * 5) * 5) % 5, st = A.ORE_STYLE[ci];
+        const ci = Math.floor(V.hash2(c * 7, r * 5) * A.ORE_STYLE.length) % A.ORE_STYLE.length, st = A.ORE_STYLE[ci];
         A.drawSprite(ctx, st.shape, st.pal, c * tile + 4, y0 + r * tile + 4, 1, 0.95);
       }
     }
@@ -832,6 +852,7 @@
 
     drawTitleScene(310);
     if (App.achBanner) drawAchBanner();
+    drawStrataBanner();
   }
 
   function drawAch() {
@@ -859,6 +880,25 @@
     });
     uctx.fillStyle = C.line2; uctx.fillRect(50, 314, 540, 1);
     tx(hover.v || '刷成就和变强是同一条线', 50, 320, { c: hover.v ? C.ink : C.dim2 });
+  }
+
+  /**
+   * 矿层播报：顶部通栏条，单行。
+   * 早先做成居中的方框，结果横跨侧栏、半透明把底下的字透出来，读着很乱；
+   * 通栏条不遮任何卡片内容，也更像"到了一个新地方"的章节标题。
+   */
+  function drawStrataBanner() {
+    const b = App.strataBanner; if (!b) return;
+    const h = 30, y0 = 54;          // HUD 高 52，紧贴其下
+    uctx.globalAlpha = Math.min(1, b.t * 1.2);
+    uctx.fillStyle = 'rgba(8,10,16,0.97)'; uctx.fillRect(0, y0, W, h);
+    uctx.fillStyle = C.gold;
+    uctx.fillRect(0, y0, W, 1); uctx.fillRect(0, y0 + h - 1, W, 1);
+    A.drawSprite(uctx, 'ladder', 'steel', 8, y0 + 7, 1);
+    tx('进入', 22, y0 + 7, { c: C.dim2 });
+    tx(b.name, 58, y0 + 6, { c: C.gold });
+    tx(b.brief, W - 12, y0 + 7, { c: C.dim, a: 'right' });
+    uctx.globalAlpha = 1;
   }
 
   function drawAchBanner() {
@@ -1246,6 +1286,7 @@
     App.t += dt;
     if (App.msgT > 0) App.msgT -= dt;
     if (App.achBanner) { App.achBanner.t -= dt; if (App.achBanner.t <= 0) App.achBanner = null; }
+    if (App.strataBanner) { App.strataBanner.t -= dt; if (App.strataBanner.t <= 0) App.strataBanner = null; }
     buttons = {}; // 重建热区
     // 模态判定：只要有一层弹窗开着（三选一/塌方结算/商店/说明/换色），
     // 底下的侧栏按钮就**不许注册热区**。否则 hit() 按插入顺序会先命中底层按钮：

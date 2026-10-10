@@ -14,8 +14,8 @@
   /* ---------------- 常量 ---------------- */
   const COLS = 7, ROWS = 9;
   const T = { ORE: 0, POISON: 1, LAVA: 2, BEDROCK: 3, HEART: 4, FOSSIL: 5,
-              DEEPSTONE: 6, CRYSTAL: 7, GASVEIN: 8 };
-  const TNAME = ['矿石', '沼气泡', '岩浆', '坚岩', '矿脉之心', '化石', '深岩', '晶簇', '毒气矿脉'];
+              DEEPSTONE: 6, CRYSTAL: 7, GASVEIN: 8, MAGNET: 9 };
+  const TNAME = ['矿石', '沼气泡', '岩浆', '坚岩', '矿脉之心', '化石', '深岩', '晶簇', '毒气矿脉', '磁石'];
   /* 精英危险矿（深度 6+ 才出现）。
      设计意图：普通危险矿只是"绕开就行"的路障，精英必须让玩家做选择——
        深岩  ：挖不掉且每层向下生长，会永久改变矿道走向（改道成本 vs 绕路成本）
@@ -28,9 +28,54 @@
     { name: '苍铜', hex: '#16a085' },
     { name: '蓝荧', hex: '#2f6fd0' },
     { name: '紫晶', hex: '#8e44ad' },
-    { name: '硫金', hex: '#d4a017' }
+    { name: '硫金', hex: '#d4a017' },
+    { name: '银砂', hex: '#c9d4e0' }     // 只在深渊出现：高对比的浅色，视觉上就是"另一个世界"
   ];
   const RARITY = ['普通', '稀有', '传说'];
+
+  /* ---------------- 矿层（Strata）：每 5 层换一次"地方" ----------------
+   * 加这一层的目的：原来每层手感完全一样，玩家只感到"数字在涨"。
+   * 每层的**危险矿总量与原来的深度曲线对齐**，只在种类之间重新分配 ——
+   * 这样既换出了面目，又不会悄悄改掉已经验证过的难度曲线。
+   *   crystalPerLevel / heartPerLevel 是补给配额（见 enforceQuota）。 */
+  const STRATA = [
+    { id: 'surface', name: '表层矿脉', from: 1, to: 5, colors: 4,
+      brief: '松软的浅层，还闻得到地面的味道。',
+      crystalPerLevel: 1, heartPerLevel: 1, tint: 'rgba(40,52,72,0.16)',
+      hazard: { fossil: 0.030, heart: 0.006, bedrock: 0.034, lava: 0, poison: 0.044,
+                crystal: 0.004, deepstone: 0, gasvein: 0, magnet: 0 } },
+
+    { id: 'geode', name: '晶洞层', from: 6, to: 10, colors: 4,
+      brief: '晶簇成片 —— 但深岩也密，能挖的路比别处窄。',
+      crystalPerLevel: 2, heartPerLevel: 0, tint: 'rgba(70,90,140,0.18)',
+      // 富矿要配拥挤：晶簇多（补给）但深岩也多（挖不动的永久障碍），
+      // 于是"要不要来晶洞层"变成一个真实的取舍，而不是白送空气。
+      // 总量仍与原曲线对齐（.342），只换种类。
+      hazard: { fossil: 0.030, heart: 0.000, bedrock: 0.052, lava: 0.062, poison: 0.090,
+                crystal: 0.024, deepstone: 0.064, gasvein: 0.020, magnet: 0 } },
+
+    { id: 'magma', name: '熔岩层', from: 11, to: 15, colors: 5,
+      brief: '岩浆顶替了沼气：踩错一步，代价翻三倍。',
+      crystalPerLevel: 1, heartPerLevel: 1, tint: 'rgba(120,50,40,0.20)',
+      hazard: { fossil: 0.030, heart: 0.011, bedrock: 0.070, lava: 0.160, poison: 0.040,
+                crystal: 0.020, deepstone: 0.060, gasvein: 0.034, magnet: 0.020 } },
+
+    { id: 'deeprock', name: '深岩层', from: 16, to: 20, colors: 5,
+      brief: '深岩密布，矿道被迫拐弯 —— 空间本身成了敌人。',
+      crystalPerLevel: 1, heartPerLevel: 1, tint: 'rgba(60,66,86,0.22)',
+      hazard: { fossil: 0.030, heart: 0.011, bedrock: 0.080, lava: 0.090, poison: 0.060,
+                crystal: 0.014, deepstone: 0.110, gasvein: 0.030, magnet: 0.028 } },
+
+    { id: 'abyss', name: '深渊', from: 21, to: 999, colors: 6,
+      brief: '没有安全的地方。收益也是全程最高的。',
+      crystalPerLevel: 1, heartPerLevel: 1, tint: 'rgba(90,60,120,0.22)',
+      hazard: { fossil: 0.030, heart: 0.014, bedrock: 0.090, lava: 0.100, poison: 0.080,
+                crystal: 0.010, deepstone: 0.100, gasvein: 0.040, magnet: 0.040 } }
+  ];
+  function stratumOf(depth) {
+    for (const st of STRATA) if (depth >= st.from && depth <= st.to) return st;
+    return STRATA[STRATA.length - 1];
+  }
 
   const CFG = {
     cols: COLS, rows: ROWS,
@@ -51,20 +96,17 @@
     thresholdMulFloor: 0.5,            // 下潜阈值折减下限（乘算叠加的封底）
     digCostCap: 12,                    // 每 N 格耗 1 点空气的上限（省力类叠加的封顶）
     defaultMaxStack: 3,                // 非 unique 词条的默认叠加上限（淘金曾被抽到 25 份）
-    crystalPerLevel: 1,                // 每层最多刷出的晶簇数（空气补给配额）
+    // 晶簇的身份是"补给"（+1 空气），不是收入来源。
+    // 晶洞层把配额提到 2 之后，实测它贡献了中位 +98 晶尘、把长线从 9 局压到 6 局；
+    // 所以把它的晶尘价值调低，保留"值得绕路"的手感但不让它撑起经济。
+    crystalDust: 22,
+    magnetDust: 90,
+    crystalPerLevel: 1,                // 每层最多刷出的晶簇数（空气补给配额，可按矿层覆盖）
     heartPerLevel: 1,                  // 每层最多刷出的矿脉之心数
     lavaSpread: (d) => d >= 15 ? 3 : (d >= 10 ? 2 : (d >= 5 ? 1 : 0)),
     collapseDustLoss: 0.5,             // 塌方丢掉本局一半晶尘
-    hazard: (d) => ({                   // 单格生成危险矿的概率
-      fossil: 0.030,
-      heart: d >= 3 ? 0.011 : 0,
-      bedrock: Math.min(0.020 + 0.010 * (d - 1), 0.120),
-      lava: d >= 5 ? Math.min(0.020 * (d - 4), 0.090) : 0,
-      poison: Math.min(0.020 + 0.014 * (d - 1), 0.150),
-      crystal: d >= 6 ? Math.min(0.004 + 0.0015 * (d - 6), 0.014) : 0,
-      deepstone: d >= 8 ? Math.min(0.006 + 0.002 * (d - 8), 0.020) : 0,
-      gasvein: d >= 9 ? Math.min(0.006 + 0.002 * (d - 9), 0.018) : 0
-    })
+    // 单格生成危险矿的概率：按矿层给（每层的总量与原曲线对齐，只换种类）
+    hazard: (d) => stratumOf(d).hazard
   };
 
   /* ---------------- 深渊等级（Ascension）：无限难度天梯 ----------------
@@ -117,7 +159,7 @@
   const DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
   const inB = (r, c) => r >= 0 && r < ROWS && c >= 0 && c < COLS;
 
-  function colorCount(depth) { return CFG.colorRamp[Math.min(depth - 1, CFG.colorRamp.length - 1)]; }
+  function colorCount(depth) { return stratumOf(depth).colors; }
 
   function rollCell(depth, rng, mult) {
     const p = CFG.hazard(depth), k = mult == null ? 1 : mult;
@@ -142,10 +184,10 @@
     for (let c = 0; c < COLS; c++) {
       const t = row[c] && row[c].t;
       if (t === T.CRYSTAL) {
-        if (s._quota.crystal >= CFG.crystalPerLevel) row[c] = { t: T.ORE, c: s.rng.int(colorCount(s.depth)) };
+        if (s._quota.crystal >= stratumOf(s.depth).crystalPerLevel) row[c] = { t: T.ORE, c: s.rng.int(colorCount(s.depth)) };
         else s._quota.crystal++;
       } else if (t === T.HEART) {
-        if (s._quota.heart >= CFG.heartPerLevel) row[c] = { t: T.ORE, c: s.rng.int(colorCount(s.depth)) };
+        if (s._quota.heart >= stratumOf(s.depth).heartPerLevel) row[c] = { t: T.ORE, c: s.rng.int(colorCount(s.depth)) };
         else s._quota.heart++;
       }
     }
@@ -230,6 +272,7 @@
     }
     if (cell.t === T.DEEPSTONE) return { kind: 'invalid', reason: '深岩：镐头崩了，只能绕开' };
     if (cell.t === T.GASVEIN) return { kind: 'pick', group: [{ r, c }], cost: 0, dmg: f.poisonImmune ? 0 : 2, label: '凿开毒气矿脉' };
+    if (cell.t === T.MAGNET) return { kind: 'pick', group: [{ r, c }], cost: 0, dmg: 2, label: '凿开磁石' };
     if (cell.t === T.CRYSTAL) return { kind: 'bonus', group: [{ r, c }], cost: 0, dmg: 0, label: '开采晶簇' };
     if (cell.t === T.HEART || cell.t === T.FOSSIL) return { kind: 'bonus', group: [{ r, c }], cost: 0, dmg: 0, label: '拾取' };
     return { kind: 'invalid', reason: '' };
@@ -431,7 +474,8 @@
     } else if (a.kind === 'bonus') {
       const cell = s.board[r][c];
       if (cell.t === T.HEART) { gain = 12; s.air = Math.min(s.airMax, s.air + 1); log(s, '挖到矿脉之心：空气 +1。'); }
-      else if (cell.t === T.CRYSTAL) { gain = 30; s.air = Math.min(s.airMax, s.air + 1); s.dugCrystal++; log(s, '开采晶簇：空气 +1。'); }
+      else if (cell.t === T.CRYSTAL) { gain = CFG.crystalDust; s.air = Math.min(s.airMax, s.air + 1); s.dugCrystal++; log(s, '开采晶簇：空气 +1。'); }
+      else if (cell.t === T.MAGNET) { gain = CFG.magnetDust; s.dugMagnet++; log(s, '拆掉磁石：+' + CFG.magnetDust + ' 晶尘，它不会再吞你的空间了。'); }
       else gain = 6;
       gain = Math.round(gain * s.relicFlags.scoreMul * (s.relicFlags.bonusMul || 1));
     }
@@ -442,6 +486,7 @@
       const cell = s.board[p.r][p.c];
       if (!cell) continue;
       if (isElite(cell.t)) s.stats.elites++;
+      if (cell.t === T.MAGNET && s.stats) s.stats.magnets = (s.stats.magnets || 0) + 1;
       if (cell.t === T.HEART) s.dugHeart++;
       if (cell.t === T.FOSSIL) s.dugFossil++;
       dugCells.push({ r: p.r, c: p.c, t: cell.t, col: cell.c });
@@ -725,6 +770,29 @@
     }
     if (infected) log(s, '毒气矿脉污染了 ' + infected + ' 格矿石。');
 
+    // 磁石：每处把 1 个相邻矿石吞成坚岩 —— 它吃的是"空间"本身。
+    // 这是第四个精英，设计上和深岩/毒气形成三角：
+    //   深岩 = 挖不掉（改变路线）／毒气 = 会传染（变本加厉）／磁石 = 吃掉空间（地图缩小）
+    // 玩家必须权衡：花 2 点空气 + 一格镐击拆掉它（还有 90 晶尘），还是绕开让它继续吃。
+    let eaten = 0, g4 = 0;
+    for (let r = 0; r < ROWS && g4 < 2; r++) for (let c = 0; c < COLS && g4 < 2; c++) {
+      const cell = s.board[r][c];
+      if (!cell || cell.t !== T.MAGNET) continue;
+      const nb = [];
+      for (const d of DIRS) {
+        const nr = r + d[0], nc = c + d[1];
+        if (!inB(nr, nc)) continue;
+        const x = s.board[nr][nc];
+        if (x && x.t === T.ORE) nb.push([nr, nc]);
+      }
+      if (!nb.length) continue;
+      const t = s.rng.pick(nb);
+      s.board[t[0]][t[1]] = { t: T.BEDROCK };
+      ev(s, { type: 'elite', kind: 'magnet', r: t[0], c: t[1] });
+      eaten++; g4++;
+    }
+    if (eaten) log(s, '磁石吞掉了 ' + eaten + ' 格矿石（变成坚岩）。');
+
     // 【通风井】：每下潜 N 层额外弹一次三选一
     if (s.relicFlags.extraDraftEvery && s.depth % s.relicFlags.extraDraftEvery === 0) {
       s.pendingDraft++;
@@ -849,6 +917,7 @@
   /* ---------------- 导出 ---------------- */
   root.Vein = {
     COLS, ROWS, T, TNAME, COLORS, RARITY, CFG, UPGRADES, ASCENSION, UNLOCK_COST,
+    STRATA, stratumOf,
     makeRng, hash2, colorCount,
     newRun, newBoard, cellAt, isEmpty, isFrontier, sameGroup, allFrontierGroups, bestGroup,
     actionFor, applyAction, ascend, takeRelic, skipDraft, useActive, descend: doDescend, syncAirMax,

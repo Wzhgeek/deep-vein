@@ -1,7 +1,7 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "released": "2026-10-10",
-  "notes": "首个公开版本：40 条词条、三种精英矿、24 条成就、每日挑战、20 级深渊天梯。",
+  "notes": "矿层系统：每 5 层换一个地方（表层矿脉/晶洞层/熔岩层/深岩层/深渊），各有生成表、配色与色调；新增第 4 种精英「磁石」与第 6 种矿石「银砂」。",
   "url": "https://github.com/Wzhgeek/deep-vein/releases/latest",
   "pages": "https://wzhgeek.github.io/deep-vein/"
 }
