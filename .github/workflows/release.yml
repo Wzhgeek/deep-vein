@@ -42,8 +42,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: '20' }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
       - name: 安装图标生成依赖
-        run: python3 -m pip install --quiet --user pillow
+        run: python -m pip install --quiet pillow
       - name: 构建 .app
         run: bash packaging/macos/build.sh
       - name: 打包成 zip（保留可执行权限）
@@ -65,16 +67,29 @@ jobs:
         with: { node-version: '20' }
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '17' }
-      - uses: android-actions/setup-android@v3
-      - name: 安装 SDK 组件
-        run: sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      # ubuntu-latest 自带 Android SDK，直接用即可。
+      # （之前用第三方 android-actions/setup-android@v3，它自己那一步就失败了。）
+      - name: 准备 Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          SDKMANAGER=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)
+          [ -z "$SDKMANAGER" ] && SDKMANAGER="$ANDROID_HOME/tools/bin/sdkmanager"
+          echo "sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "platforms;android-34" "build-tools;34.0.0" "platform-tools" || true
+          ls "$ANDROID_HOME/platforms" 2>/dev/null || true
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'    # AGP 8.5.2 需要 Gradle 8.7；默认装最新版会不兼容
       - name: 安装图标生成依赖
-        run: python3 -m pip install --quiet pillow
+        run: python -m pip install --quiet pillow
       - name: 构建 APK
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
         run: |
+          echo "sdk.dir=$ANDROID_HOME" > packaging/android/local.properties
           node tools/build-version.js
           node tools/build-single.js
           cp dist/矿脉.html packaging/android/app/src/main/assets/deepvein.html
