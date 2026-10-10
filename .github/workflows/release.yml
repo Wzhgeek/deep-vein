@@ -1,0 +1,134 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '版本号（如 v1.0.1）'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  # ---------- 网页/单文件版 ----------
+  web:
+    name: 单文件版 + 截图
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: node tools/build-version.js
+      - run: node tools/build-single.js
+      - name: 自动截图
+        run: node tools/screenshot.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: html
+          path: dist/矿脉.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: assets/screenshots/
+
+  # ---------- macOS 应用 ----------
+  macos:
+    name: macOS .app
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: 构建 .app
+        run: bash packaging/macos/build.sh
+      - name: 打包成 zip（保留可执行权限）
+        run: |
+          cd packaging/macos/build
+          ditto -c -k --sequesterRsrc --keepParent "矿脉.app" "DeepVein-macos.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: packaging/macos/build/DeepVein-macos.zip
+
+  # ---------- Android APK ----------
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: android-actions/setup-android@v3
+      - name: 安装 SDK 组件
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: 构建 APK
+        run: |
+          node tools/build-version.js
+          node tools/build-single.js
+          cp dist/矿脉.html packaging/android/app/src/main/assets/deepvein.html
+          python3 tools/make_app_icons.py
+          cd packaging/android && gradle assembleDebug --no-daemon
+      - name: 改名
+        run: cp packaging/android/app/build/outputs/apk/debug/app-debug.apk DeepVein-android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: DeepVein-android.apk
+
+  # ---------- 汇总发布 ----------
+  publish:
+    name: 创建 Release
+    needs: [web, macos, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts }
+
+      - name: 整理产物
+        run: |
+          mkdir -p out
+          cp artifacts/html/矿脉.html out/DeepVein-single.html
+          cp artifacts/macos/DeepVein-macos.zip out/
+          cp artifacts/android/DeepVein-android.apk out/
+          cp -r artifacts/screenshots out/screenshots
+          ls -laR out | head -40
+
+      - name: 生成 Release 说明
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          {
+            echo "## 矿脉 Deep Vein $TAG"
+            echo
+            echo "### 下载"
+            echo "- **DeepVein-single.html** — 单文件游戏，双击即玩（约 240 KB）"
+            echo "- **DeepVein-macos.zip** — macOS 应用（解压后拖进「应用程序」；首次打开需右键→打开）"
+            echo "- **DeepVein-android.apk** — Android 安装包（debug 签名，需允许「未知来源」）"
+            echo
+            echo "### 网页版"
+            echo "https://wzhgeek.github.io/deep-vein/"
+            echo
+            echo "### 本版变更"
+            sed -n "/^## \[${TAG#v}\]/,/^## \[/p" CHANGELOG.md | sed '$d' || echo "见 CHANGELOG.md"
+            echo
+            echo "---"
+            echo "游戏内会自动检查更新：打开标题页若看到「新版本可用」，说明有更新的发布。"
+          } > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: 矿脉 Deep Vein ${{ github.event.inputs.tag || github.ref_name }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            out/DeepVein-single.html
+            out/DeepVein-macos.zip
+            out/DeepVein-android.apk
+          draft: false

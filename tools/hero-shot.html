@@ -1,0 +1,45 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>hero</title>
+<style>html,body{margin:0;background:#05060a;overflow:hidden}#stage{position:relative}#game{image-rendering:pixelated}#ui{position:absolute;left:0;top:0}</style>
+</head><body>
+<div id="stage"><canvas id="game"></canvas><canvas id="ui"></canvas></div>
+<script>window.__errors=[];window.onerror=function(m,s,l){window.__errors.push(m+'@'+l)};</script>
+<script src="../src/core.js"></script><script src="../src/relics.js"></script>
+<script src="../src/achievements.js"></script><script src="../src/pixfont.js"></script>
+<script src="../src/art.js"></script><script src="../src/audio.js"></script><script src="../src/app.js"></script>
+<script>
+(function(){
+  const V=globalThis.Vein, App=globalThis.VeinApp;
+  App.setAuto(false);
+  // 注意：resize() 会重设 ui 画布尺寸（= 清空像素）。测试里关掉了自动循环，
+  // 所以必须在 resize 后手动补一帧，否则窗口尺寸变化会把 UI 层清成空白。
+  addEventListener('resize', () => App.renderFrame(1/60));
+  const F=n=>{for(let i=0;i<n;i++)App.renderFrame(1/60);};
+  function botMove(s){let b=null;for(let r=0;r<V.ROWS;r++)for(let c=0;c<V.COLS;c++){const x=s.board[r][c];if(!x||!V.isFrontier(s,r,c))continue;const a=V.actionFor(s,r,c);if(a.kind==='invalid')continue;const sc=a.kind==='bonus'?900:a.kind==='dig'?210+a.group.length*12+r*3:60-a.dmg*40;if(!b||sc>b.sc)b={sc,r,c};}return b;}
+  const PREF=['resonance','bloodline','furnace','doom','chain','tunnel','airpocket','lightpick','resonator','doublepick'];
+  App.setMeta(Object.assign(App.getMeta(),{dust:820,bestDepth:17,runs:12}));
+  App.startRun();
+  const s=App.run;
+  let g=0;
+  while(g++<900){
+    if(s.phase==='draft'){const p=s.draft.find(x=>PREF.includes(x))||s.draft[0];V.takeRelic(s,p);continue;}
+    if(s.depth>=7||s.phase==='over')break;
+    const mv=botMove(s); if(!mv||!V.applyAction(s,mv.r,mv.c).ok)break;
+    for(const e of s.events.splice(0)) if(e.type==='dig') App.cave[s.depth-1]=(App.cave[s.depth-1]||0)|e.cells.reduce((m,c)=>m|(1<<c.c),0);
+  }
+  App.mode='play';
+  const bg=V.bestGroup(s);
+  if(bg){App.hover={r:bg[0].r,c:bg[0].c};App.hoverGroup=bg;}
+  F(4);
+  // 诊断：UI 画布到底有没有内容
+  const uc = document.getElementById('ui');
+  const g2 = uc.getContext('2d');
+  let nonEmpty = 0;
+  try {
+    const d = g2.getImageData(0, 0, uc.width, uc.height).data;
+    for (let i = 3; i < d.length; i += 4 * 97) if (d[i] > 8) nonEmpty++;
+  } catch (e) { nonEmpty = -1; }
+  document.title = (window.__errors.length ? ('FAIL:' + window.__errors.join('|')) : 'PASS')
+    + ' | ui=' + uc.width + 'x' + uc.height + ' | uiDisplay=' + uc.style.width + 'x' + uc.style.height
+    + ' | 非空像素采样=' + nonEmpty + ' | mode=' + App.mode + ' | scale=' + (uc.width / 640);
+})();
+</script></body></html>

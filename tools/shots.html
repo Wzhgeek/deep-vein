@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>DeepVein shot</title>
+<style>
+  html,body{margin:0;padding:0;background:#05060a;overflow:hidden}
+  /* 只显示一张合成画布：无头截图对"绝对定位叠加的 canvas"合成不可靠
+     （实测 shop/成就/深渊三张会截成纯黑，而标题页正常）。
+     手动 drawImage 合成到一张画布是确定性的，也是 scene-shot.html 一直在用的做法。 */
+  #offscreen{position:absolute;left:-9999px;top:0}
+  #out{display:block;image-rendering:pixelated}
+</style>
+</head>
+<body>
+<!-- 单场景渲染页：给 tools/screenshot.js 用。URL 形如 shots.html#shop -->
+<div id="offscreen"><canvas id="game"></canvas><canvas id="ui"></canvas></div>
+<canvas id="out" width="640" height="360"></canvas>
+<script>window.__errors=[];window.onerror=function(m,s,l){window.__errors.push(m+' @'+l)};</script>
+<script src="../src/version.js"></script>
+<script src="../src/update.js"></script>
+<script src="../src/core.js"></script>
+<script src="../src/relics.js"></script>
+<script src="../src/achievements.js"></script>
+<script src="../src/pixfont.js"></script>
+<script src="../src/art.js"></script>
+<script src="../src/audio.js"></script>
+<script src="../src/app.js"></script>
+<script>
+(function () {
+  const V = globalThis.Vein, App = globalThis.VeinApp, U = globalThis.VeinUpdate;
+  App.setAuto(false);
+  const F = n => { for (let i = 0; i < n; i++) App.renderFrame(1 / 60); };
+  const M = App.getMeta();
+
+  function botMove(s) {                       // 让"对局中"截图是真实玩过的盘面，不是开局
+    let best = null;
+    for (let r = 0; r < V.ROWS; r++) for (let c = 0; c < V.COLS; c++) {
+      const cell = s.board[r][c]; if (!cell || !V.isFrontier(s, r, c)) continue;
+      const a = V.actionFor(s, r, c); if (a.kind === 'invalid') continue;
+      const sc = a.kind === 'bonus' ? 900 : a.kind === 'dig' ? 220 + a.group.length * 10 + r * 3 : 40 - a.dmg * 40;
+      if (!best || sc > best.sc) best = { sc, r, c };
+    }
+    return best;
+  }
+  function playMoves(s, n) {
+    for (let i = 0; i < n; i++) {
+      if (s.phase === 'draft') { V.takeRelic(s, s.draft[0]); continue; }
+      const mv = botMove(s); if (!mv) break;
+      V.applyAction(s, mv.r, mv.c);
+    }
+  }
+  // 只解锁起步词条 —— 商店"研究"页要有 22 条待解锁才好看（全解锁只剩一行字，截图会显得是空的）
+  const startOnly = () => { const u = {}; V.RELICS.forEach(r => { if (r.start) u[r.id] = 1; }); return u; };
+  const freshMeta = (o) => Object.assign(M, {
+    tutorialDone: true, dust: 1240, bestDepth: 17, bestDust: 4210, runs: 23,
+    unlocked: (function () { const u = {}; V.RELICS.forEach(r => { u[r.id] = 1; }); return u; })(),
+    ascension: 0, ascMax: 3
+  }, o || {});
+
+  const SCENES = {
+    title: () => { freshMeta({ dust: 1860, bestDepth: 17, runs: 23 }); App.mode = 'title'; App.updateResult = null; },
+    play: () => { freshMeta(); App.startRun(); App.mode = 'play'; playMoves(App.run, 70); },
+    tutorial: () => { freshMeta({ tutorialDone: false, dust: 320, bestDepth: 0, runs: 0 }); App.startRun(); App.mode = 'play'; },
+    draft: () => { freshMeta(); App.startRun(); App.mode = 'play'; playMoves(App.run, 34);
+                   const s = App.run; s.phase = 'draft'; s.draft = ['chain', 'twin', 'lavaheart']; App.mode = 'draft'; },
+    shop: () => { freshMeta({ dust: 1860, unlocked: startOnly(), runs: 23, bestDepth: 17 }); M.shopTab = 'rel'; App.mode = 'shop'; },
+    ascension: () => { freshMeta({ dust: 3200, ascension: 2, ascMax: 5, unlocked: startOnly() }); M.shopTab = 'asc'; App.mode = 'shop'; },
+    settle: () => { freshMeta(); App.startRun(); App.mode = 'play'; playMoves(App.run, 60); App.doAscend(); },
+    achievements: () => {
+      freshMeta();
+      const ids = globalThis.VeinAchievements.ALL.slice(0, 13).map(a => a.id);
+      M.achievements = {}; ids.forEach((id, i) => M.achievements[id] = Date.now() - i * 8e6);
+      App.mode = 'ach';
+    },
+    deep: () => { freshMeta({ dust: 4210, ascension: 1 }); App.startRun(); App.mode = 'play'; playMoves(App.run, 150); }
+  };
+
+  const want = (location.hash || '#title').slice(1);
+  const name = SCENES[want] ? want : 'title';
+  // 渲染也必须包在 try 里：之前 F() 在外面，一旦抛异常脚本就死掉，
+  // 画面停在纯黑、错误还被吞了 —— 截图看起来只是"这张图是黑的"，很难查。
+  try { SCENES[name](); F(3); } catch (e) {
+    window.__errors.push('scene:' + e.message + ' @' + (e.stack || '').split('\n')[1]);
+  }
+  if (window.__errors.length) {
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;left:0;top:0;right:0;background:#a00;color:#fff;' +
+      'font:12px monospace;padding:6px;white-space:pre-wrap;z-index:9';
+    d.textContent = 'SHOT ERROR\n' + window.__errors.join('\n');
+    document.body.appendChild(d);
+  }
+  // 把两层画布合成成一张：截图拍的就是这张
+  try {
+    const g = document.getElementById('game'), u = document.getElementById('ui');
+    const out = document.getElementById('out'), oc = out.getContext('2d');
+    oc.fillStyle = '#05060a'; oc.fillRect(0, 0, 640, 360);
+    oc.drawImage(g, 0, 0, 640, 360);
+    oc.drawImage(u, 0, 0, 640, 360);
+  } catch (e) { window.__errors.push('compose:' + e.message); }
+
+  if (window.__errors.length) {
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;left:0;top:0;right:0;background:#a00;color:#fff;' +
+      'font:12px monospace;padding:6px;white-space:pre-wrap;z-index:9';
+    d.textContent = 'SHOT ERROR\n' + window.__errors.join('\n');
+    document.body.appendChild(d);
+  }
+  document.title = 'READY:' + name + (window.__errors.length ? ' ERRORS' : '');
+  window.__shotReady = name;
+})();
+</script>
+</body>
+</html>

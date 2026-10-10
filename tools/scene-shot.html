@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>DeepVein scenes</title>
+<style>
+  html,body{margin:0;background:#05060a}
+  #stage{position:relative}
+  #game{image-rendering:pixelated}
+  #ui{position:absolute;left:0;top:0}
+  #shots{display:flex;flex-direction:column;gap:6px;padding:6px}
+  #shots canvas{display:block;box-shadow:0 0 0 1px #1b2130}
+</style>
+</head>
+<body>
+<div style="position:absolute;left:-9999px;top:0"><div id="stage"><canvas id="game"></canvas><canvas id="ui"></canvas></div></div>
+<div id="shots"></div>
+<script>window.__errors=[];window.onerror=function(m,s,l){window.__errors.push(m+' @'+l)};</script>
+<script src="../src/core.js"></script>
+<script src="../src/relics.js"></script>
+<script src="../src/achievements.js"></script>
+<script src="../src/pixfont.js"></script>
+<script src="../src/art.js"></script>
+<script src="../src/audio.js"></script>
+<script src="../src/app.js"></script>
+<script>
+(function () {
+  const V = globalThis.Vein, App = globalThis.VeinApp;
+  App.setAuto(false);
+  const F = n => { for (let i = 0; i < n; i++) App.renderFrame(1 / 60); };
+  function capture() {
+    const g = document.getElementById('game'), u = document.getElementById('ui');
+    const c = document.createElement('canvas'); c.width = g.width; c.height = g.height;
+    const cx = c.getContext('2d');
+    cx.fillStyle = '#05060a'; cx.fillRect(0, 0, c.width, c.height);
+    cx.drawImage(g, 0, 0); cx.drawImage(u, 0, 0);
+    document.getElementById('shots').appendChild(c);
+  }
+  function botMove(s) {
+    let best = null;
+    for (let r = 0; r < V.ROWS; r++) for (let c = 0; c < V.COLS; c++) {
+      const cell = s.board[r][c]; if (!cell || !V.isFrontier(s, r, c)) continue;
+      const a = V.actionFor(s, r, c); if (a.kind === 'invalid') continue;
+      const sc = a.kind === 'bonus' ? 900 : a.kind === 'dig' ? 220 + a.group.length * 10 + r * 3 : 40 - a.dmg * 40;
+      if (!best || sc > best.sc) best = { sc, r, c };
+    }
+    return best;
+  }
+  // 0) 新手教学首局（聚光灯 + 单条提示）
+  App.setMeta(Object.assign(App.getMeta(), { tutorialDone: false, dust: 320, bestDepth: 14, runs: 7 }));
+  App.startRun(); F(2); capture();
+  if (App.endTutorial) App.endTutorial(false);      // 后续场景不再显示教学覆盖层
+
+  // 1) 商店：强化页
+  App.setMeta(Object.assign(App.getMeta(), { tutorialDone: true, dust: 1240, unlocked: (function(){const u={};V.RELICS.forEach(r=>{if(r.start)u[r.id]=1;});return u;})() }));
+  App.getMeta().shopTab = 'up'; App.mode = 'shop'; F(2); capture();
+
+  // 2) 商店：词条研究页
+  App.getMeta().shopTab = 'rel'; F(2); capture();
+
+  // 3) 商店：深渊天梯页
+  App.setMeta(Object.assign(App.getMeta(), { ascMax: 4, ascension: 2, shopTab: 'asc' })); F(2); capture();
+
+  // 4) 出发装备三选一
+  App.setMeta(Object.assign(App.getMeta(), { shopTab: 'up' }));
+  App.getMeta().upgrades.slot = 1;
+  App.startRun(); F(2); capture();
+  App.mode = 'title';
+
+  // 5) 商店（先清掉横幅，别挡镜头）
+  App.achBanner = null;
+  App.setMeta(Object.assign(App.getMeta(), { dust: 1240, upgrades: { air: 1, pickaxe: 1, veteran: 0, survey: 1, luck: 0, lamp: 0 } }));
+  App.mode = 'shop'; F(2); capture();
+  // 6) 说明
+  App.mode = 'help'; F(2); capture();
+  document.title = window.__errors.length ? 'FAIL:' + window.__errors.join('|') : 'PASS';
+})();
+</script>
+</body>
+</html>

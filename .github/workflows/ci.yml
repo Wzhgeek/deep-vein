@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: 平衡与断言
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+
+      - name: 单局平衡 + 核心不变式
+        run: node tools/sim.js 300
+
+      - name: 元进程模拟（长期目标时长）
+        run: node tools/meta-sim.js 40
+
+      - name: 生成版本号与单文件构建
+        run: |
+          node tools/build-version.js
+          node tools/build-single.js
+
+      - name: 浏览器断言（热区/越界/缺字/死按钮…）
+        run: node tools/smoke.js
+
+      - name: 自动截图 + 非空白校验
+        run: node tools/screenshot.js
+
+      - name: 失败时留下截图作为证据
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-on-failure
+          path: assets/screenshots/
+          if-no-files-found: ignore

@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>DeepVein smoke</title>
+<style>html,body{margin:0;background:#05060a}#game{image-rendering:pixelated}#ui{position:absolute;left:0;top:0}#out{color:#9f9;font:12px monospace;white-space:pre-wrap;padding:8px}</style>
+</head>
+<body>
+<div id="stage"><canvas id="game"></canvas><canvas id="ui"></canvas></div>
+<pre id="out">running…</pre>
+<script>
+  window.__errors = [];
+  window.onerror = function (m, s, l) { window.__errors.push(String(m) + ' @' + String(s).split('/').pop() + ':' + l); };
+</script>
+<script src="../src/core.js"></script>
+<script src="../src/relics.js"></script>
+<script src="../src/achievements.js"></script>
+<script src="../src/pixfont.js"></script>
+<script src="../src/art.js"></script>
+<script src="../src/audio.js"></script>
+<script src="../src/app.js"></script>
+<script>
+/* 同步 smoke test：不依赖 rAF（本机 headless Chrome 的 virtual-time 会挂死）。
+   用 App.renderFrame(dt) 手动驱动渲染，任何绘制异常都会被 window.onerror 抓到。   */
+(function () {
+  const V = globalThis.Vein, App = globalThis.VeinApp, log = [];
+  App.setAuto(false);                       // 关掉自动循环，完全由测试驱动
+  const F = (n) => { for (let i = 0; i < (n || 1); i++) App.renderFrame(1 / 60); };
+  /* 用真实 MouseEvent 点 UI 画布上的某个热区中心，走完整的 hit() 判定路径。
+     这是为了测"弹窗按钮会不会被底下没清掉的按钮吃掉"这类 z 序 bug。 */
+  function clickKey(key) {
+    const b = App.buttons()[key];
+    if (!b) return 'no-such-button:' + key;
+    const ui = document.getElementById('ui');
+    const r = ui.getBoundingClientRect(), k = ui.width / App.width();   // 内部宽度不能写死
+    const ev = new MouseEvent('click', { clientX: r.left + (b.x + b.w / 2) * k, clientY: r.top + (b.y + b.h / 2) * k, bubbles: true, cancelable: true });
+    ui.dispatchEvent(ev);
+    return 'ok';
+  }
+  function botMove(s) {
+    let best = null;
+    for (let r = 0; r < V.ROWS; r++) for (let c = 0; c < V.COLS; c++) {
+      const cell = s.board[r][c]; if (!cell || !V.isFrontier(s, r, c)) continue;
+      const a = V.actionFor(s, r, c); if (a.kind === 'invalid') continue;
+      const sc = a.kind === 'bonus' ? 900 : a.kind === 'dig' ? 200 + a.group.length * 12 : 60 - a.dmg * 40;
+      if (!best || sc > best.sc) best = { sc, r, c };
+    }
+    return best;
+  }
+  try {
+    F(3);
+    log.push('boot: mode=' + App.mode + '  渲染 3 帧无异常（标题页）');
+
+    App.setMeta(Object.assign(App.getMeta(), { dust: 5000, tutorialDone: true }));
+    for (const m of ['shop', 'help']) { App.mode = m; F(2); }
+    App.mode = 'shop'; F(1);
+    App.buyUpgrade('air'); App.buyUpgrade('pickaxe');
+    log.push('商店: 购买后 air Lv' + App.getMeta().upgrades.air + ' / pickaxe Lv' + App.getMeta().upgrades.pickaxe + '  余额 ' + App.getMeta().dust);
+    App.mode = 'title'; F(1);
+
+    // ---- 真打一局，每 10 步渲染一帧 ----
+    App.startRun();
+    const s = App.run;
+    log.push('开局: seed=' + s.seed + '  盘面 ' + V.COLS + 'x' + V.ROWS + '  空气 ' + s.air + '  词条池 ' + V.RELICS.length);
+    let steps = 0, drafts = 0, clicks = 0, frames = 0;
+    while (steps++ < 4000 && s.phase !== 'over') {
+      if (s.phase === 'draft') { App.mode = 'draft'; F(1); frames++; App.pickDraft(s.draft[0]); drafts++; App.mode = 'play'; continue; }
+      const mv = botMove(s); if (!mv) break;
+      if (!V.applyAction(s, mv.r, mv.c).ok) break;
+      clicks++;
+      if (steps % 10 === 0) { F(1); frames++; }
+    }
+    App.mode = 'play'; F(4);
+    log.push('一局结束: 深度 ' + s.depth + '  操作 ' + clicks + ' 次  三选一 ' + drafts + ' 次  词条 ' + s.relics.length + ' 条  晶尘 ' + s.dust + '  状态 ' + s.phase + '  期间渲染 ' + frames + ' 帧');
+
+    App.doAscend(); F(2);
+    log.push('结算页: mode=' + App.mode + '  银行晶尘 ' + App.getMeta().dust + '  最深 ' + App.getMeta().bestDepth + ' 层');
+
+    App.startRun(); F(1);
+    const s2 = App.run;
+    log.push('第二局开局: mode=' + App.mode);
+
+    // 主动技能：换色 / 捷径
+    s2.relics.push('swap'); s2.charges['swap'] = 2; V.recomputeFlags(s2);
+    App.mode = 'swap'; App.swapFrom = 0; App.swapTo = 2; F(2);
+    let n0 = 0; for (let r = 0; r < V.ROWS; r++) for (let c = 0; c < V.COLS; c++) { const x = s2.board[r][c]; if (x && x.t === 0 && x.c === 0) n0++; }
+    const r2 = V.useActive(s2, 'swap', { from: 0, to: 2 });
+    let n2 = 0; for (let r = 0; r < V.ROWS; r++) for (let c = 0; c < V.COLS; c++) { const x = s2.board[r][c]; if (x && x.t === 0 && x.c === 2) n2++; }
+    App.mode = 'play'; F(1);
+    log.push('主动【换色】: ' + JSON.stringify(r2) + '  赤铁 ' + n0 + ' 块已变色  剩余 ' + s2.charges['swap'] + ' 次');
+    if (s2.relics.indexOf('shortcut') < 0) { s2.relics.push('shortcut'); s2.charges['shortcut'] = 3; V.recomputeFlags(s2); }
+    const d0 = s2.depth; V.useActive(s2, 'shortcut'); F(1);
+    log.push('主动【捷径】: 深度 ' + d0 + ' -> ' + s2.depth);
+
+    // 传说词条【大地脉动】触发时不能崩
+    if (s2.relics.indexOf('pulse') < 0) { s2.relics.push('pulse'); V.recomputeFlags(s2); }
+    for (let i = 0; i < 60; i++) { const mv = botMove(s2); if (!mv) break; if (!V.applyAction(s2, mv.r, mv.c).ok) break; F(1); }
+    log.push('【大地脉动】+ 60 步连打后正常: 深度 ' + s2.depth + ' 晶尘 ' + s2.dust + ' 空气 ' + s2.air);
+
+    // 塌方 -> 结算
+    const s3 = V.newRun(4242, { upgrades: {} });
+    let guard = 0, coll = false;
+    while (guard++ < 4000 && s3.phase !== 'over') {
+      if (s3.phase === 'draft') { V.takeRelic(s3, s3.draft[0]); continue; }
+      const mv = botMove(s3); if (!mv) break;
+      if (!V.applyAction(s3, mv.r, mv.c).ok) break;
+    }
+    App.run = s3; App.lastResult = V.ascend(s3); App.mode = 'over'; F(3);
+    log.push('塌方路径: phase=' + s3.phase + ' dead=' + s3.dead + ' 深度 ' + s3.depth + '  结算页渲染 OK');
+
+    // ---- 回归测试：弹窗按钮不能被底下的侧栏按钮吃掉 ----
+    App.startRun(); App.mode = 'play'; F(2);
+    clickKey('btn:ascend'); F(2);
+    log.push('回归·正常升井: 对局中点【升井结算】-> ' + App.mode + (App.mode === 'over' ? '   ✅ 模态层没有误伤正常按钮' : '   ❌ 被模态层挡住了'));
+
+    App.startRun(); App.mode = 'play'; F(2);
+    clickKey('btn:help'); F(2);
+    const m1 = App.mode;
+    const r1 = clickKey('btn:home'); F(2);
+    const m2 = App.mode;
+    log.push('回归·说明页: 点【玩法说明】-> ' + m1 + '，再点【返回】-> ' + m2 + (m2 === 'title' && m1 === 'help' ? '   ✅' : '   ❌ 应该回到标题页'));
+
+    App.startRun(); App.mode = 'play'; F(2);
+    App.doAscend(); F(2);
+    const wasOver = App.mode === 'over';
+    const runBefore = App.run;
+    clickKey('btn:again'); F(2);
+    log.push('回归·结算页: 点【再下一次井】-> ' + App.mode + (App.mode !== 'over' && App.run !== runBefore ? '   ✅ 确实开了新一局' : '   ❌ 没开起新局') + '（结算页本身 ' + (wasOver ? '正常' : '异常') + '）');
+
+    App.startRun(); F(1);
+    const s4 = App.run;
+    s4.phase = 'draft'; s4.draft = ['chain', 'twin', 'lavaheart']; App.mode = 'draft'; F(2);
+    clickKey('btn:skip'); F(2);
+    log.push('回归·三选一: 点【跳过】-> phase=' + s4.phase + ' mode=' + App.mode + (s4.phase === 'play' ? '   ✅ 没有误触发升井' : '   ❌'));
+
+    // ---- 热区重叠断言：覆盖全部界面 ----
+    // 这是「说明页点返回却跳结算页」那个 z 序 bug 的永久防线：
+    // 任意两个同时可点的热区都不允许重叠（重叠 = 其中一个必然点不到）。
+    const scenes = [
+      ['标题', () => { App.mode = 'title'; }],
+      ['对局', () => { App.startRun(); App.mode = 'play'; }],
+      ['三选一', () => { const r = App.run; r.phase = 'draft'; r.draft = ['chain', 'twin', 'lavaheart']; App.mode = 'draft'; }],
+      ['结算', () => { App.run.phase = 'play'; App.lastResult = V.ascend(App.run); App.mode = 'over'; }],
+      ['商店', () => { App.mode = 'shop'; }],
+      ['说明', () => { App.mode = 'help'; }],
+      ['成就', () => { App.mode = 'ach'; }],
+      ['三选一', () => { const r = App.run; r.phase = 'draft'; r.draft = ['chain', 'twin', 'lavaheart']; App.mode = 'draft'; }],
+      ['商店强化', () => { App.getMeta().shopTab = 'up'; App.mode = 'shop'; }],
+      ['商店研究', () => { App.getMeta().shopTab = 'rel'; App.mode = 'shop'; }],
+      ['商店深渊', () => { App.getMeta().shopTab = 'asc'; App.mode = 'shop'; }],
+      ['出发装备', () => { App.getMeta().upgrades.slot = 1; App.startOffer = ['chain', 'twin', 'pulse']; App.mode = 'startpick'; }],
+      ['更新提示', () => {
+        App.mode = 'title';
+        App.updateResult = { ok: true, latest: '9.9.9', hasNew: true, url: 'https://example.com/dl' };
+      }],
+      ['新手教学', () => {
+        App.getMeta().tutorialDone = false;
+        App.getMeta().upgrades.slot = 0;
+        App.startRun(); App.mode = 'play';
+      }],
+      ['换色', () => { App.startRun(); App.mode = 'play'; F(1); App.run.relics.push('swap'); App.run.charges['swap'] = 2; V.recomputeFlags(App.run); App.mode = 'swap'; App.swapFrom = 1; App.swapTo = 2; }]
+    ];
+    globalThis.PixFont.resetMissing();   // 缺字自检从零开始
+    App.fitIssues = [];                   // 按钮文字适配自检
+    // 文字越界自检：包装 draw，记录任何画到画布外的文字。
+    // （这一条抓到过"给中文串传 2 倍缩放"导致整行冲出屏幕的 bug）
+    {
+      const Pf = globalThis.PixFont, _d = Pf.draw;
+      window.__textOverflow = [];
+      Pf.draw = function (ctx, str, x, y, opt) {
+        const w = _d.apply(this, arguments);
+        // 用渲染器回报的实绘包围盒，而不是从参数反推（参数里的键名曾与实际读的键不一致）
+        const b = Pf.lastBox;
+        if (b && (b.x < -2 || b.x + b.w > App.width() + 2 || b.y < -2 || b.y + b.h > App.height() + 2))
+          window.__textOverflow.push(String(str).slice(0, 12) + ' @' + Math.round(b.x) + ',' + Math.round(b.y) + ' w' + Math.round(b.w));
+        return w;
+      };
+    }
+    let overlapBad = [];
+    window.__allKeys = {};   // 收集所有注册过的热区，用来检查"有没有接上点击处理"
+    const _bk = App.buttons;
+    const _origRender = App.renderFrame;
+    for (const [nm, setup] of scenes) {
+      setup(); F(2);
+      for (const k of Object.keys(App.buttons())) window.__allKeys[k] = 1;
+      const bad = App.hotzoneOverlaps();
+      if (bad.length) overlapBad.push(nm + ': ' + bad.join(' | '));
+    }
+    log.push('热区重叠断言（' + scenes.length + ' 个界面）: ' + (overlapBad.length ? '❌ ' + overlapBad.join(' ;; ') : '✅ 全部界面无热区重叠'));
+    log.push('文字越界自检: ' + (window.__textOverflow.length ? ('❌ ' + window.__textOverflow.length + ' 处 -> ' + window.__textOverflow.slice(0, 8).join(' | ')) : '✅ 无文字超出画布'));
+    const fits = App.fitIssues || [];
+    // 每个热区都必须有对应的点击分支，否则就是"点了没反应"的死按钮
+    const HANDLED = /^(relic:|draft:|ach:|tab:|asc:|unlock:|start:|buy:|swapA:|swapB:|btn:(start|again|daily|shop|ach|help|home|mute|ascend|skip|startskip|tutskip|retut|swapgo|update|reload|checkver)$)/;
+    const dead = Object.keys(window.__allKeys).filter(k => !HANDLED.test(k));
+    log.push('死按钮检查: ' + (dead.length ? ('❌ 注册了热区但没有点击处理 -> ' + dead.join(', ')) : '✅ 所有热区都有对应处理'));
+    log.push('按钮文字适配: ' + (fits.length ? ('❌ ' + fits.length + ' 处 -> ' + fits.slice(0, 8).join(' | ')) : '✅ 全部按钮文字都放得进'));
+    const miss = globalThis.PixFont.missing();
+    log.push('点阵缺字自检: ' + (miss.length ? ('❌ ' + miss.length + ' 个缺失 -> ' + miss.slice(0, 20).join(' ')) : '✅ 全部界面零缺字') + '（字库 ' + globalThis.PixFont.chars() + ' 字）');
+
+    // ---- 每日种子：同一天必须是同一座矿 ----
+    App.mode = 'title'; F(1);
+    App.startRun({ daily: true }); const sd1 = App.run.seed;
+    App.startRun({ daily: true }); const sd2 = App.run.seed;
+    log.push('每日种子: ' + sd1 + ' / ' + sd2 + ' (今天=' + App.todayLabel() + ')' + (sd1 === sd2 && sd1 >= 0 ? '   ✅ 同一天同一座矿' : '   ❌ 种子不稳定'));
+    App.startRun(); const sr1 = App.run.seed, sr2b = (App.startRun(), App.run.seed);
+    log.push('普通种子随机: ' + sr1 + ' / ' + sr2b + (sr1 !== sr2b ? '   ✅ 每局不同' : '   ❌ 没随机'));
+
+    // ---- 成就系统 ----
+    const meta0 = App.getMeta();
+    const dust0 = meta0.dust, unlocked0 = Object.keys(meta0.achievements || {}).length;
+    App.startRun(); F(1);
+    const s6 = App.run;
+    s6.stats.biggest = 20; s6.depth = 10; s6.dugOre = 30; s6.dugHeart = 3; s6.stats.elites = 5;
+    s6.relics = ['pulse', 'rewind', 'doom']; V.recomputeFlags(s6);
+    App.checkLive();
+    const unlocked1 = Object.keys(App.getMeta().achievements || {}).length;
+    App.checkFinal({ dead: false, banked: 2000, collapses: 0, depth: 12, relics: ['pulse'], hits: 0 });
+    const unlocked2 = Object.keys(App.getMeta().achievements || {}).length;
+    const dustGain = App.getMeta().dust - dust0;
+    log.push('成就: 解锁 ' + unlocked0 + ' -> ' + unlocked1 + ' (live) -> ' + unlocked2 + ' (结算)  奖励晶尘 +' + dustGain + (unlocked2 > unlocked0 && dustGain > 0 ? '   ✅' : '   ❌'));
+    const total = globalThis.VeinAchievements.count();
+    log.push('成就池: ' + total + ' 条   全部含 desc/reward: ' + (globalThis.VeinAchievements.ALL.every(a => a.name && a.desc && a.reward > 0) ? '✅' : '❌'));
+
+    // ---- 新手教学：脚本化首局端到端 ----
+    App.getMeta().tutorialDone = false;
+    App.getMeta().upgrades.slot = 0;      // 否则会先进"出发装备"界面，走不到教学
+    App.startRun(); F(2);
+    const st0 = App.tut ? App.tut.on : false;
+    const tut0 = App.tut ? App.tut.step : -1;
+    log.push('教学触发: ' + (st0 ? '✅ 首次下井自动进入教学（第 ' + (tut0 + 1) + ' 步）' : '❌ 没有触发'));
+    // 逐步驱动：直接调用核心做对应的动作
+    const ts = App.run;
+    let guard2 = 0;
+    while (App.tut && App.tut.on && guard2++ < 400) {
+      const Vv = V;
+      // 找一个合法动作执行
+      let mv = null;
+      for (let r = 0; r < Vv.ROWS && !mv; r++) for (let c = 0; c < Vv.COLS && !mv; c++) {
+        const a = Vv.actionFor(ts, r, c); if (a.kind !== 'invalid') mv = { r, c };
+      }
+      if (!mv) break;
+      Vv.applyAction(ts, mv.r, mv.c);
+      App.checkLive(); // 触发进度推进
+      // 手工推进教学（点击路径已覆盖，这里直接调内部推进）
+      App.tutAdvance();
+      F(1);
+      if (ts.depth >= 3 && ts.relics.length >= 1) break;
+    }
+    log.push('教学推进: 深度 ' + ts.depth + ' 词条 ' + ts.relics.length + ' · 教学状态 ' + (App.tut && App.tut.on ? ('进行中(第' + (App.tut.step + 1) + '步)') : '已结束'));
+    const dustBeforeTut = App.getMeta().dust;
+    if (App.tut && App.tut.on) { App.doAscend(); }
+    log.push('教学后 tutorialDone=' + App.getMeta().tutorialDone + '（跳过或完成都会置位）');
+
+    // 存档
+    App.saveMeta();
+    let ls = 'n/a'; try { ls = localStorage.getItem('deepvein.meta.v1') ? '写入成功(' + localStorage.getItem('deepvein.meta.v1').length + ' 字节)' : '空'; } catch (e) { ls = '被拒绝: ' + e.name; }
+    log.push('localStorage: ' + ls);
+
+    log.push('同步逻辑 + 渲染全程错误数: ' + window.__errors.length);
+    window.__errors.forEach(e => log.push('   ✗ ' + e));
+    document.getElementById('out').textContent = log.join('\n') + '\nSMOKE_DONE';
+    document.title = window.__errors.length ? 'FAIL' : 'PASS';
+  } catch (e) {
+    document.getElementById('out').textContent = log.join('\n') + '\nEXCEPTION: ' + (e && e.stack || e);
+    document.title = 'FAIL';
+  }
+})();
+</script>
+</body>
+</html>
