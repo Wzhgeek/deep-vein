@@ -1,21 +1,24 @@
 name: Deploy to GitHub Pages
 
+# 部署到 gh-pages 分支。
+# （原先用 actions/deploy-pages + configure-pages，但仓库未启用 Pages 时
+#   configure-pages 必失败 —— 启用 Pages 是仓库设置层面的动作，工作流改不动它。
+#   推到分支则不会失败：你在 Settings → Pages 里把 Source 选成 gh-pages 分支即可生效。）
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,24 +28,19 @@ jobs:
       - name: 生成版本号
         run: node tools/build-version.js
 
-      - name: 组装站点（只保留运行游戏需要的文件）
+      - name: 组装站点
         run: |
           mkdir -p _site
-          cp -r index.html manifest.webmanifest sw.js version.json assets src _site/
-          rm -rf _site/assets/screenshots/../screenshots 2>/dev/null || true
+          cp index.html manifest.webmanifest sw.js version.json _site/
+          cp -r assets src _site/
+          # 站点里只保留 PWA 图标，截图不必上线
+          rm -rf _site/assets/screenshots
+          ls _site
 
-      - uses: actions/configure-pages@v5
+      - name: 推送到 gh-pages 分支
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          enablement: true    # 仓库还没启用 Pages 时自动开启（否则这一步会失败）
-      - uses: actions/upload-pages-artifact@v3
-        with: { path: _site }
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_site
+          publish_branch: gh-pages
+          commit_message: 'deploy: ${{ github.event.head_commit.message }}'
