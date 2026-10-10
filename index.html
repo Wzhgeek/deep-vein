@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>矿脉 Deep Vein — 消除 × 肉鸽</title>
+<meta name="theme-color" content="#05060a">
+<meta name="description" content="像素风消除×肉鸽小游戏：你消掉的不是方块，是空间。">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="矿脉">
+<meta name="mobile-web-app-capable" content="yes">
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #05060a; color: #8b93a8;
+    font-family: ui-monospace, Menlo, "PingFang SC", monospace;
+    overflow: hidden;
+  }
+  #wrap {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 10px;
+  }
+  #stage { position: relative; line-height: 0; }
+  canvas { display: block; }
+  #game {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    border: 1px solid #1b2130;
+    border-radius: 3px;
+    box-shadow: 0 0 0 1px #000, 0 12px 40px rgba(0,0,0,.75);
+  }
+  #ui { position: absolute; left: 0; top: 0; }
+  #hint { font-size: 11px; letter-spacing: .4px; opacity: .55; text-align: center; }
+  #hint b { color: #c3cad8; font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="stage">
+    <canvas id="game"></canvas>
+    <canvas id="ui"></canvas>
+  </div>
+  <div id="hint">
+    <b>点矿石</b> 挖掉同色相连 ≥2 块 · <b>点孤块/危险矿</b> 开凿（免费但不给进度） ·
+    <b>1/2/3</b> 选词条 · <b>A</b> 升井 · <b>D</b> 每日 · <b>T</b> 成就 · <b>S</b> 商店 · <b>H</b> 说明 · <b>M</b> 静音
+  </div>
+</div>
+<script src="src/core.js"></script>
+<script src="src/relics.js"></script>
+<script src="src/version.js"></script>
+<script src="src/update.js"></script>
+<script src="src/pixfont.js"></script>
+<script src="src/art.js"></script>
+<script src="src/achievements.js"></script>
+<script src="src/audio.js"></script>
+<script src="src/app.js"></script>
+<script>
+// 注册 Service Worker（仅在 http/https 下有效；直接双击打开 file:// 时会静默跳过）
+// 更新流程：发现新版本 -> 立刻让新 SW 接管(skipWaiting) -> 通知游戏显示"点击刷新生效"。
+// 不做自动刷新 —— 玩家可能正打到一半，强制刷新会毁掉这一局。
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js').then(function (reg) {
+      function watch(worker) {
+        if (!worker) return;
+        worker.addEventListener('statechange', function () {
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+            window.VeinSWWaiting = worker;      // 有新版本在等
+            try { worker.postMessage({ type: 'SKIP_WAITING' }); } catch (e) {}
+          }
+        });
+      }
+      if (reg.waiting) { window.VeinSWWaiting = reg.waiting; try { reg.waiting.postMessage({ type: 'SKIP_WAITING' }); } catch (e) {} }
+      if (reg.installing) watch(reg.installing);
+      reg.addEventListener('updatefound', function () { watch(reg.installing); });
+      reg.update().catch(function () {});
+    }).catch(function () {});
+  });
+}
+window.VeinApplyUpdate = function () { location.reload(); };
+</script>
+</body>
+</html>
