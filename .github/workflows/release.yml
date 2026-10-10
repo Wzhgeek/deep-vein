@@ -88,11 +88,10 @@ jobs:
       - name: 构建 APK
         run: |
           echo "sdk.dir=$ANDROID_HOME" > packaging/android/local.properties
-          node tools/build-version.js
-          node tools/build-single.js
-          cp dist/矿脉.html packaging/android/app/src/main/assets/deepvein.html
-          python3 tools/make_app_icons.py
-          cd packaging/android && gradle assembleDebug --no-daemon
+          # 直接调用打包脚本：mkdir / 版本号 / 单文件 / 图标 / gradle 它全包了。
+          # 之前工作流自己抄了一遍这些步骤，结果漏了 mkdir —— assets 是空目录，
+          # git 不跟踪空目录，所以 cp 直接失败（APK 首发就卡在这）。
+          bash packaging/android/build.sh
       - name: 改名
         run: cp packaging/android/app/build/outputs/apk/debug/app-debug.apk DeepVein-android.apk
       - uses: actions/upload-artifact@v4
