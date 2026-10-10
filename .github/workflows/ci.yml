@@ -26,6 +26,9 @@ jobs:
           node tools/build-version.js
           node tools/build-single.js
 
+      - name: Python 依赖（截图/图标工具用）
+        run: python3 -m pip install --quiet pillow
+
       - name: 浏览器断言（热区/越界/缺字/死按钮…）
         run: node tools/smoke.js
 
