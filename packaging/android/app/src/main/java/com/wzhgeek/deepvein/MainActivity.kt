@@ -1,12 +1,16 @@
 package com.wzhgeek.deepvein
 
 import android.annotation.SuppressLint
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.view.WindowManager
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
 
 /**
@@ -39,14 +43,13 @@ class MainActivity : AppCompatActivity() {
             overScrollMode = View.OVER_SCROLL_NEVER
             loadUrl("file:///android_asset/deepvein.html")
             // 站内请求（assets/本地文件）自己处理；其余外链（如更新下载页）交给系统浏览器
-            webViewClient = object : android.webkit.WebViewClient() {
-                override fun shouldOverrideUrlLoading(
-                    view: WebView?, request: android.webkit.WebResourceRequest?
-                ): Boolean {
-                    val u = request?.url?.toString() ?: return false
+            webViewClient = object : WebViewClient() {
+                // 参数类型必须与 Java 侧一致（不能声明成可空），否则 Kotlin 报 "overrides nothing"
+                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                    val u = request.url.toString()
                     if (u.startsWith("file://")) return false
                     return try {
-                        startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(u)))
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u)))
                         true
                     } catch (e: Exception) { true }
                 }

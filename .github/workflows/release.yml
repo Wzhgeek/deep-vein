@@ -69,6 +69,8 @@ jobs:
       - name: 安装 SDK 组件
         run: sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'    # AGP 8.5.2 需要 Gradle 8.7；默认装最新版会不兼容
       - name: 安装图标生成依赖
         run: python3 -m pip install --quiet pillow
       - name: 构建 APK
@@ -89,20 +91,23 @@ jobs:
   publish:
     name: 创建 Release
     needs: [web, macos, android]
+    # 只要有一个平台构建成功就发布（首次跑 Android 时尤其重要），
+    # 不要因为某一个平台挂了就什么都不发。
+    if: always() && (needs.web.result == 'success' || needs.macos.result == 'success' || needs.android.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: { path: artifacts }
 
-      - name: 整理产物
+      - name: 整理产物（缺哪个就跳过哪个）
         run: |
           mkdir -p out
-          cp artifacts/html/矿脉.html out/DeepVein-single.html
-          cp artifacts/macos/DeepVein-macos.zip out/
-          cp artifacts/android/DeepVein-android.apk out/
-          cp -r artifacts/screenshots out/screenshots
-          ls -laR out | head -40
+          [ -f artifacts/html/矿脉.html ] && cp artifacts/html/矿脉.html out/DeepVein-single.html || echo "缺: 单文件版"
+          [ -f artifacts/macos/DeepVein-macos.zip ] && cp artifacts/macos/DeepVein-macos.zip out/ || echo "缺: macOS"
+          [ -f artifacts/android/DeepVein-android.apk ] && cp artifacts/android/DeepVein-android.apk out/ || echo "缺: Android"
+          [ -d artifacts/screenshots ] && cp -r artifacts/screenshots out/screenshots || true
+          echo "--- 即将发布 ---"; ls -la out
 
       - name: 生成 Release 说明
         run: |
@@ -131,8 +136,5 @@ jobs:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           name: 矿脉 Deep Vein ${{ github.event.inputs.tag || github.ref_name }}
           body_path: RELEASE_NOTES.md
-          files: |
-            out/DeepVein-single.html
-            out/DeepVein-macos.zip
-            out/DeepVein-android.apk
+          files: out/*
           draft: false

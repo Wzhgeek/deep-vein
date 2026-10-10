@@ -32,6 +32,8 @@ jobs:
           rm -rf _site/assets/screenshots/../screenshots 2>/dev/null || true
 
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true    # 仓库还没启用 Pages 时自动开启（否则这一步会失败）
       - uses: actions/upload-pages-artifact@v3
         with: { path: _site }
 

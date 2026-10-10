@@ -20,7 +20,7 @@ APP="$BUILD/矿脉.app"
 NAME="DeepVein"
 
 echo "▸ 1/5 重新生成单文件游戏"
-cd "$ROOT" && "$NODE" tools/build-single.js
+cd "$ROOT" && "$NODE" tools/build-version.js && "$NODE" tools/build-single.js
 
 echo "▸ 2/5 组装 .app 目录结构"
 rm -rf "$APP"

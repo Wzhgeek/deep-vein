@@ -12,7 +12,7 @@ NODE="${NODE:-$(command -v node || true)}"
 HERE="$(cd "$(dirname "$0")" && pwd)"; ROOT="$(cd "$HERE/../.." && pwd)"
 
 echo "▸ 1/3 重新生成单文件游戏，并放进 assets/"
-cd "$ROOT" && "$NODE" tools/build-single.js
+cd "$ROOT" && "$NODE" tools/build-version.js && "$NODE" tools/build-single.js
 mkdir -p "$HERE/app/src/main/assets"
 cp "$ROOT/dist/矿脉.html" "$HERE/app/src/main/assets/deepvein.html"
 
