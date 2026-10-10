@@ -24,7 +24,9 @@
     steel:   { 1: '#e8edf5', 2: '#98a3b8', 3: '#5c6678', 4: '#2a3140' },
     deepstone: { 1: '#7d6ba3', 2: '#463a63', 3: '#281f3d', 4: '#0c0912' },
     crystal:   { 1: '#dcfaff', 2: '#5bd6f0', 3: '#1f7fae', 4: '#0a2736' },
-    gasvein:   { 1: '#c4ff8a', 2: '#63a82c', 3: '#2e5a13', 4: '#0f1f06' }
+    gasvein:   { 1: '#c4ff8a', 2: '#63a82c', 3: '#2e5a13', 4: '#0f1f06' },
+    silver:    { 1: '#ffffff', 2: '#c9d4e0', 3: '#7f8b9c', 4: '#333c4a' },
+    magnet:    { 1: '#ffd0d0', 2: '#d8443c', 3: '#7a2420', 4: '#2a0e0c' }
   };
 
   /* 8x8 位图：0 = 透明，1-4 = 明度 */
@@ -153,6 +155,28 @@
       '.411114.',
       '..4444..'
     ],
+    // 第 6 种矿石（银砂，只在深渊出现）：六边形，和已有五种形状都不撞轮廓
+    hex: [
+      '..4444..',
+      '.411114.',
+      '41111124',
+      '41122224',
+      '41222234',
+      '41233334',
+      '.433334.',
+      '..4444..'
+    ],
+    // 磁石：马蹄形磁铁（中间镂空 + 两极用亮色），一眼能和别的精英区分
+    magnet: [
+      '.444444.',
+      '41111114',
+      '41.11.14',
+      '41.11.14',
+      '412..214',
+      '412..214',
+      '43222234',
+      '.433334.'
+    ],
     // 毒气矿脉：四层叠起来的气脉（绝不能画成方框 —— 会和沼气泡的"方框骷髅"撞轮廓）
     gasvein: [
       '..4444..',
@@ -182,7 +206,8 @@
     { shape: 'triangle', pal: 'teal', name: '苍铜' },
     { shape: 'diamond', pal: 'blue', name: '蓝荧' },
     { shape: 'star', pal: 'purple', name: '紫晶' },
-    { shape: 'square', pal: 'yellow', name: '硫金' }
+    { shape: 'square', pal: 'yellow', name: '硫金' },
+    { shape: 'hex', pal: 'silver', name: '银砂' }
   ];
 
   const HAZARD_STYLE = {
@@ -193,7 +218,8 @@
     5: { shape: 'fossil', pal: 'fossil', name: '化石' },
     6: { shape: 'deepstone', pal: 'deepstone', name: '深岩', elite: true },
     7: { shape: 'crystal', pal: 'crystal', name: '晶簇', elite: true },
-    8: { shape: 'gasvein', pal: 'gasvein', name: '毒气矿脉', elite: true }
+    8: { shape: 'gasvein', pal: 'gasvein', name: '毒气矿脉', elite: true },
+    9: { shape: 'magnet', pal: 'magnet', name: '磁石', elite: true }
   };
 
   /**
